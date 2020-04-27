@@ -7,14 +7,17 @@
 #include <string>
 #include <vector>
 #include <math.h>
+#include <numeric>
 
 // ------------------------------------------------------------------------------------------------------------
 
 // read given file
 // expected structure: x11 | y11 | y_err11 | y_jck11...
 //                     x21 | y21 | y_err21 | y_jck21...
+//                     x12 | y12 | y_err12 | y_jck12...
+//                     x22 | y22 | y_err22 | y_jcj22...
 //                     ... | ... |   ...   |   ...
-Eigen::MatrixXd readFile(std::string fileName)
+Eigen::MatrixXd ReadFile(std::string fileName)
 {
     // start reading
     std::ifstream fileToRead;
@@ -39,7 +42,7 @@ Eigen::MatrixXd readFile(std::string fileName)
     std::string line;
 
     // data structure to store data
-    // first col is for name
+    // first column is for name
     Eigen::MatrixXd DataMat(0, numOfCols - 1);
 
     // reopen file
@@ -79,30 +82,73 @@ Eigen::MatrixXd readFile(std::string fileName)
 
 // ------------------------------------------------------------------------------------------------------------
 
-// separate the raw data to specific quantities and collect them in a vector
-std::vector<Eigen::MatrixXd> SeparateQs(Eigen::MatrixXd const &rawDataMat, int const &numOfQs)
+double CorrCoeff(Eigen::VectorXd const &one, Eigen::VectorXd const &two, double meanOne, double meanTwo)
 {
-    // sizes of raw data matrix
-    int rows = rawDataMat.rows(), cols = rawDataMat.cols();
-    // container for separated matrices
-    std::vector<Eigen::MatrixXd> DataMatVec(numOfQs, Eigen::MatrixXd(rawDataMat.rows() / numOfQs, rawDataMat.cols()));
-    // fill container according to number of quantities
+    // number of jackknife samples
+    double NJck = (double)one.size();
+
+    // calculate correlation
+    double corr = 0;
+    for (int i = 0; i < NJck; i++)
+    {
+        corr += (one(i) - meanOne) * (two(i) - meanTwo);
+    }
+
+    return corr * (NJck - 1) / NJck;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// block from the blockdiagonal covariance matrix
+Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, int const &Q)
+{
+    // need jackknife samples to calculate correlations
+    Eigen::MatrixXd JCKs(numOfQs, rawDataMat.cols() - 3);
+    for (int i = 0; i < JCKs.cols(); i++)
+    {
+        for (int j = 0; j < JCKs.rows(); j++)
+        {
+            JCKs(j, i) = rawDataMat(Q * numOfQs + j, i + 3);
+        }
+    }
+    // get y_err data to compare with correlation results
+    Eigen::VectorXd Errs(numOfQs);
     for (int i = 0; i < numOfQs; i++)
     {
-        int qIndex = i;
-        for (int j = 0; j < rows / numOfQs; j++)
+        Errs(i) = rawDataMat(Q * numOfQs + i, 2);
+    }
+
+    // means to calculate correlations
+    std::vector<double> means(numOfQs, 0.);
+    for (int i = 0; i < numOfQs; i++)
+    {
+        means[i] = JCKs.row(i).mean();
+    }
+
+    // covariance matrix block
+    Eigen::MatrixXd C(numOfQs, numOfQs);
+    for (int i = 0; i < numOfQs; i++)
+    {
+        for (int j = i; j < numOfQs; j++)
         {
-            for (int k = 0; k < cols; k++)
+            // triangular part
+            C(j, i) = CorrCoeff(JCKs.row(i), JCKs.row(j), means[i], means[j]);
+            // using symmetris
+            if(i != j)
+                C(i, j) = C(j, i);
+            // compare correlation results with y_err data
+            if(i == j && std::abs(Errs(i) * Errs(i) - C(i, j)) / Errs(i) / Errs(i) > 1e-2)
             {
-                DataMatVec[i](j, k) = rawDataMat(qIndex, k);
+                std::cout << "WARNING\nProblem might occur with covariance matrix." << std::endl;
             }
-            qIndex += numOfQs;
         }
     }
 
-    // return matrix container
-    return DataMatVec;
+    // return inverse covariance matrix block
+    return C.inverse();
 }
+
+// ------------------------------------------------------------------------------------------------------------
 
 // main function
 // argv[1] is datafile to fit
@@ -145,10 +191,7 @@ int main(int argc, char **argv)
     }
 
     // read file to matrix
-    Eigen::MatrixXd const rawDataMat = readFile(fileName);
+    Eigen::MatrixXd const rawDataMat = ReadFile(fileName);
 
-    // separation for specific quantities
-    std::vector<Eigen::MatrixXd> const DataMatVec = SeparateQs(rawDataMat, numOfQs);
-
-    
+    std::cout << BlockC(rawDataMat, numOfQs, 1) << std::endl;
 }
