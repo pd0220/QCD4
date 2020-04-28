@@ -250,6 +250,31 @@ Eigen::VectorXd VecRHS(Eigen::VectorXd const &yData, Eigen::VectorXd const &xDat
 
 // ------------------------------------------------------------------------------------------------------------
 
+// error estimation via jackknife method
+Eigen::VectorXd JCKErrorEstimation(Eigen::VectorXd coeffs, std::vector<Eigen::VectorXd> JCKCoeffs)
+{
+    int length = coeffs.size();
+    int N = static_cast<int>(JCKCoeffs.size());
+    double preFactor = (double)(N - 1) / N;
+    auto sq = [](double x) { return x * x; };
+
+    Eigen::VectorXd sigmaSqVec(length);
+
+    for (int i = 0; i < length; i++)
+    {
+        sigmaSqVec(i) = 0;
+        for (int j = 0; j < N; j++)
+        {
+            sigmaSqVec(i) += sq(coeffs(i) - JCKCoeffs[j](i));
+        }
+        sigmaSqVec(i) = std::sqrt(preFactor * sigmaSqVec(i));
+    }
+
+    return sigmaSqVec;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
 // main function
 // argv[1] is datafile to fit
 //       1st col --> some physical quantity (x)
@@ -279,7 +304,7 @@ int main(int, char **argv)
     Eigen::MatrixXd const rawDataMat = ReadFile(fileName);
 
     // size of raw data
-    int rows = rawDataMat.rows();
+    int rows = rawDataMat.rows(), cols = rawDataMat.cols();
 
     // x values
     Eigen::VectorXd xData(rows);
@@ -293,6 +318,16 @@ int main(int, char **argv)
     for (int i = 0; i < rows; i++)
     {
         yData(i) = rawDataMat(i, 1);
+    }
+
+    // jackknife samples
+    std::vector<Eigen::VectorXd> JCKSamples(cols - 3, Eigen::VectorXd(rows));
+    for (int i = 0; i < rows; i++)
+    {
+        for (int j = 0; j < (cols - 3); j++)
+        {
+            JCKSamples[j](i) = rawDataMat(i, j + 3);
+        }
     }
 
     // inverse covariance matrix blocks for every distinct x value
@@ -311,6 +346,18 @@ int main(int, char **argv)
     // solving the linear equqation system for fitted coefficients
     Eigen::VectorXd coeffVector = (LHS).fullPivLu().solve(RHS);
 
+    // container for jackknife sample fit coefficients
+    std::vector<Eigen::VectorXd> JCKCoeffVectorContainer(cols - 3, Eigen::VectorXd(FourierCut));
+    // calculate coefficients for jackknife samples
+    for (int i = 0; i < cols - 3; i++)
+    {
+        JCKCoeffVectorContainer[i] = (LHS).fullPivLu().solve(VecRHS(JCKSamples[i], xData, CInvContainer, FourierCut, numOfQs));
+    }
+
+    // error estimation
+    Eigen::VectorXd errorVec = JCKErrorEstimation(coeffVector, JCKCoeffVectorContainer);
+
     // write results to screen
     std::cout << coeffVector << std::endl;
+    std::cout << errorVec << std::endl;
 }
