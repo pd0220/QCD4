@@ -30,9 +30,9 @@ Eigen::MatrixXd ReadFile(std::string fileName)
 
     // number of columns in given file
     int numOfCols = 0;
-    std::string temp;
+    std::string tmpString;
     // count number of writes to temporary string container
-    while (firstLineStream >> temp)
+    while (firstLineStream >> tmpString)
     {
         numOfCols++;
     }
@@ -76,33 +76,35 @@ Eigen::MatrixXd ReadFile(std::string fileName)
         std::exit(-1);
     }
 
-    // return raw data
+    // return raw data matrix with given structure
     return DataMat;
 }
 
 // ------------------------------------------------------------------------------------------------------------
 
+// calculate correlation coefficients of two datasets with given means (faster this way)
 double CorrCoeff(Eigen::VectorXd const &one, Eigen::VectorXd const &two, double meanOne, double meanTwo)
 {
     // number of jackknife samples
     double NJck = (double)one.size();
 
-    // calculate correlation
+    // calculate correlation (not normed)
     double corr = 0;
     for (int i = 0; i < NJck; i++)
     {
         corr += (one(i) - meanOne) * (two(i) - meanTwo);
     }
 
+    // return normed correlation coefficient
     return corr * (NJck - 1) / NJck;
 }
 
 // ------------------------------------------------------------------------------------------------------------
 
 // block from the blockdiagonal covariance matrix
-Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, int const &Q)
+Eigen::MatrixXd BlockCInverse(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, int const &Q)
 {
-    // need jackknife samples to calculate correlations
+    // jackknife samples to calculate/estimate correlations
     Eigen::MatrixXd JCKs(numOfQs, rawDataMat.cols() - 3);
     for (int i = 0; i < JCKs.cols(); i++)
     {
@@ -111,6 +113,7 @@ Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, in
             JCKs(j, i) = rawDataMat(Q * numOfQs + j, i + 3);
         }
     }
+
     // get y_err data to compare with correlation results
     Eigen::VectorXd Errs(numOfQs);
     for (int i = 0; i < numOfQs; i++)
@@ -134,10 +137,10 @@ Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, in
             // triangular part
             C(j, i) = CorrCoeff(JCKs.row(i), JCKs.row(j), means[i], means[j]);
             // using symmetris
-            if(i != j)
+            if (i != j)
                 C(i, j) = C(j, i);
             // compare correlation results with y_err data
-            if(i == j && std::abs(Errs(i) * Errs(i) - C(i, j)) / Errs(i) / Errs(i) > 1e-2)
+            if (i == j && std::abs(Errs(i) * Errs(i) - C(i, j)) / Errs(i) / Errs(i) > 1e-2)
             {
                 std::cout << "WARNING\nProblem might occur with covariance matrix." << std::endl;
             }
@@ -150,6 +153,103 @@ Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, in
 
 // ------------------------------------------------------------------------------------------------------------
 
+// LHS matrix element for given fit (Fourier series)
+// ** NOW ** data: imZB --> sine only, ZBB --> cosine only
+// should be modular
+double MatElement(int k, int l, Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContainer, int const &numOfQs)
+{
+    // vectors to store base function data --> size is specifically 2
+    Eigen::VectorXd baseFunc_k(numOfQs), baseFunc_l(numOfQs);
+
+    // calculate matrix element
+    double sum = 0;
+    for (int i = 0; i < (int)xData.size() / numOfQs; i++)
+    {
+        // create vectors
+        int index = i * numOfQs;
+        baseFunc_k(0) = std::sin(k * xData(index));
+        baseFunc_l(0) = std::sin(l * xData(index));
+        baseFunc_k(1) = std::cos(k * xData(index));
+        baseFunc_l(1) = std::cos(l * xData(index));
+
+        // add to sum the covariance matrix contribution
+        sum += baseFunc_l.transpose() * CInvContainer[i] * baseFunc_k;
+    }
+
+    // return calculated matrix element
+    return sum;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// left hand side matrix for linear equation system
+Eigen::MatrixXd MatLHS(Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContiner, int const &nParams, int const &numOfQs)
+{
+    // empty (square) matrix with given size
+    Eigen::MatrixXd LHS(nParams, nParams);
+
+    // fill matrix
+    for (int k = 0; k < nParams; k++)
+    {
+        for (int l = 1; l < nParams; l++)
+        {
+            LHS(k, l) = MatElement(k, l, xData, CInvContiner, numOfQs);
+        }
+    }
+
+    // return LHS matrix
+    return LHS;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// RHS vector element for given fit (Fourier series)
+double VecElement(int k, Eigen::VectorXd const &yData, Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContainer, int const &numOfQs)
+{
+    // vectors to store base function data --> size is specifically 2
+    Eigen::VectorXd baseFunc_k(numOfQs);
+    // vector to store given y values --> size is specifically 2
+    Eigen::VectorXd yVec(numOfQs);
+
+    // calculate vector element
+    double sum = 0;
+    for (int i = 0; i < (int)xData.size() / numOfQs; i++)
+    {
+        // create vectors
+        int index = i * numOfQs;
+        baseFunc_k(0) = std::sin(k * xData(index));
+        baseFunc_k(1) = std::cos(k * xData(index));
+        yVec(0) = yData(index);
+        yVec(1) = yData(index + 1);
+
+        // add to sum the covariance matrix contribution
+        sum += yVec.transpose() * CInvContainer[i] * baseFunc_k;
+    }
+
+    // return calculated matrix element
+    return sum;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// right hand side vector for linear equation system
+Eigen::VectorXd VecRHS(Eigen::VectorXd const &yData, Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContainer, int const &nParams, int const &numOfQs)
+{
+    // empty vector with given size
+    Eigen::VectorXd RHS(nParams);
+
+    // fill vector
+    for (int k = 0; k < nParams; k++)
+    {
+        RHS(k) = VecElement(k, yData, xData, CInvContainer, numOfQs);
+    }
+
+    // return RHS vector
+    return RHS;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
 // main function
 // argv[1] is datafile to fit
 //       1st col --> some physical quantity (x)
@@ -157,41 +257,60 @@ Eigen::MatrixXd BlockC(Eigen::MatrixXd const &rawDataMat, int const &numOfQs, in
 //       3rd col --> err (sigma)
 //  rest of cols --> Jackknife samples (y_jck)
 // argv[2] is the number of measured quantities
-// rest of argv --> if given degree should be fitted (true/false <--> 1/0)
-int main(int argc, char **argv)
+int main(int, char **argv)
 {
     // file name
     std::string fileName = "None";
     // check for arguments
     fileName = argv[1];
-    // container for polynomial degress
-    std::vector<bool> degContainer(argc - 3, 0);
-    int numOfBasis = 0;
-    for (int i = 0; i < argc - 3; i++)
-    {
-        degContainer[i] = std::stoi(argv[i + 3]);
-        if (degContainer[i])
-        {
-            numOfBasis++;
-        }
-    }
     //number of measured quantities
     int const numOfQs = std::stoi(argv[2]);
+    // where to cut the Fourier series
+    int const FourierCut = std::stoi(argv[3]);
 
     // error check
     if (fileName == "None")
     {
-        std::cout << "No file was given, or the file dose not exist or unavailable." << std::endl;
-        std::exit(-1);
-    }
-    if (argc < 4)
-    {
-        std::cout << "No polynomial degrees were given." << std::endl;
+        std::cout << "No file was given, or the file dose not exist, or unavailable." << std::endl;
         std::exit(-1);
     }
 
     // read file to matrix
     Eigen::MatrixXd const rawDataMat = ReadFile(fileName);
 
-    std::cout << BlockC(rawDataMat, numOfQs, 1) << std::endl;
+    // size of raw data
+    int rows = rawDataMat.rows();
+
+    // x values
+    Eigen::VectorXd xData(rows);
+    for (int i = 0; i < rows; i++)
+    {
+        xData(i) = rawDataMat(i, 0);
+    }
+
+    // y values
+    Eigen::VectorXd yData(rows);
+    for (int i = 0; i < rows; i++)
+    {
+        yData(i) = rawDataMat(i, 1);
+    }
+
+    // inverse covariance matrix blocks for every distinct x value
+    std::vector<Eigen::MatrixXd> CInvContainer((int)(rows / numOfQs), Eigen::MatrixXd(numOfQs, numOfQs));
+    for (int i = 0; i < (int)(rows / numOfQs); i++)
+    {
+        CInvContainer[i] = BlockCInverse(rawDataMat, numOfQs, i);
+    }
+
+    // LHS matrix for the linear equation system
+    Eigen::MatrixXd LHS = MatLHS(xData, CInvContainer, FourierCut, numOfQs);
+
+    // RHS vector for the linear equation system
+    Eigen::VectorXd RHS = VecRHS(yData, xData, CInvContainer, FourierCut, numOfQs);
+
+    // solving the linear equqation system for fitted coefficients
+    Eigen::VectorXd coeffVector = (LHS).fullPivLu().solve(RHS);
+
+    // write results to screen
+    std::cout << coeffVector << std::endl;
 }
