@@ -167,10 +167,10 @@ double MatElement(int k, int l, Eigen::VectorXd const &xData, std::vector<Eigen:
     {
         // create vectors
         int index = i * numOfQs;
-        baseFunc_k(0) = std::sin(k * xData(index));
-        baseFunc_l(0) = std::sin(l * xData(index));
-        baseFunc_k(1) = std::cos(k * xData(index));
-        baseFunc_l(1) = std::cos(l * xData(index));
+        baseFunc_k(0) = k * std::sin(k * xData(index));
+        baseFunc_l(0) = l * std::sin(l * xData(index));
+        baseFunc_k(1) = k * k * std::cos(k * xData(index));
+        baseFunc_l(1) = l * l * std::cos(l * xData(index));
 
         // add to sum the covariance matrix contribution
         sum += baseFunc_l.transpose() * CInvContainer[i] * baseFunc_k;
@@ -217,8 +217,8 @@ double VecElement(int k, Eigen::VectorXd const &yData, Eigen::VectorXd const &xD
     {
         // create vectors
         int index = i * numOfQs;
-        baseFunc_k(0) = std::sin(k * xData(index));
-        baseFunc_k(1) = std::cos(k * xData(index));
+        baseFunc_k(0) = k * std::sin(k * xData(index));
+        baseFunc_k(1) = k * k * std::cos(k * xData(index));
         yVec(0) = yData(index);
         yVec(1) = yData(index + 1);
 
@@ -282,6 +282,7 @@ Eigen::VectorXd JCKErrorEstimation(Eigen::VectorXd coeffs, std::vector<Eigen::Ve
 //       3rd col --> err (sigma)
 //  rest of cols --> Jackknife samples (y_jck)
 // argv[2] is the number of measured quantities
+// argv[3] where to cut Fourier series
 int main(int, char **argv)
 {
     // file name
