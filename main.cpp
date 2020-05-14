@@ -447,8 +447,8 @@ int main(int, char **argv)
     // AIC
     double aic = AIC_weight(chiSq, nDoF);
 
-        // write results to screen
-        std::cout << "Fitted parameters:" << std::endl;
+    // write results to screen
+    std::cout << "Fitted parameters:" << std::endl;
     std::cout << coeffVector << std::endl;
     std::cout << "Estimated (jackknife) error for fitted paramteres:" << std::endl;
     std::cout << errorVec << std::endl;
