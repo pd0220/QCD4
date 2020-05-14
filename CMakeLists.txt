@@ -14,6 +14,8 @@ if (MSVC)
   string(REGEX REPLACE "/W[0-9]" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 endif (MSVC)
 
+#SET(CMAKE_CXX_FLAGS "-lgsl -lgslcblas -lm -O3")
+
 add_executable(CorrFit main.cpp)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 17

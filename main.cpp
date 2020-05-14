@@ -9,6 +9,8 @@
 #include <math.h>
 #include <numeric>
 
+#include <gsl/gsl_cdf.h>
+
 // ------------------------------------------------------------------------------------------------------------
 
 // read given file
@@ -203,6 +205,27 @@ Eigen::MatrixXd MatLHS(Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd
 
 // ------------------------------------------------------------------------------------------------------------
 
+// base functions
+double BaseFunc(int type, int k, double x)
+{
+    // determine type
+    if (type == 0)
+    {
+        return k * std::sin(k * x);
+    }
+    else if (type == 1)
+    {
+        return k * k * std::cos(k * x);
+    }
+    else
+    {
+        std::cout << "ERROR: overindex in base function." << std::endl;
+        std::exit(-1);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
 // RHS vector element for given fit (Fourier series)
 double VecElement(int k, Eigen::VectorXd const &yData, Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContainer, int const &numOfQs)
 {
@@ -217,8 +240,12 @@ double VecElement(int k, Eigen::VectorXd const &yData, Eigen::VectorXd const &xD
     {
         // create vectors
         int index = i * numOfQs;
-        baseFunc_k(0) = k * std::sin(k * xData(index));
-        baseFunc_k(1) = k * k * std::cos(k * xData(index));
+        //baseFunc_k(0) = k * std::sin(k * xData(index));
+        //baseFunc_k(1) = k * k * std::cos(k * xData(index));
+        for (int j = 0; j < numOfQs; j++)
+        {
+            baseFunc_k(j) = BaseFunc(j, k, xData(index));
+        }
         yVec(0) = yData(index);
         yVec(1) = yData(index + 1);
 
@@ -271,6 +298,61 @@ Eigen::VectorXd JCKErrorEstimation(Eigen::VectorXd coeffs, std::vector<Eigen::Ve
     }
 
     return sigmaSqVec;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// chiSquared value (fit quality)
+double ChiSq(Eigen::VectorXd const &yData, Eigen::VectorXd const &xData, std::vector<Eigen::MatrixXd> const &CInvContainer, int const &numOfQs, Eigen::VectorXd coeffVector)
+{
+    // number of fitted paramters
+    int nParams = coeffVector.size();
+    // sum over blocks
+    double sum = 0;
+    for (int i = 0; i < (int)xData.size() / numOfQs; i++)
+    {
+        // delta vector for given block --> size is equal to number of measured quantities
+        // y data vector for given block (data point for given x-value)
+        Eigen::VectorXd deltaVec(numOfQs), yVec(numOfQs);
+        // fill measured data vector and calculate delta vector
+        for (int j = 0; j < numOfQs; j++)
+        {
+            // helper index
+            int index = i * numOfQs;
+            // fill vector
+            yVec(j) = yData(i * numOfQs + j);
+            // calculate fitted function for data points
+            double deltaSum = 0;
+            for (int k = 0; k < nParams; k++)
+            {
+                deltaSum += coeffVector(k) * BaseFunc(j, k, xData(index));
+            }
+            // fill delta vector
+            deltaVec(j) = yVec(j) - deltaSum;
+        }
+
+        // add contribution to chiSquared (matrix multiplication block by block)
+        sum += deltaVec.transpose() * CInvContainer[i] * deltaVec;
+    }
+
+    // return chiSquared
+    return sum;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// calculate number of degrees of freedom
+int NDoF(Eigen::VectorXd const &xData, Eigen::VectorXd const &coeffVector)
+{
+    return (int)xData.size() - coeffVector.size() + 1;
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
+// AIC weight
+double AIC_weight(double const &chiSq, int const &ndof)
+{
+    return std::exp(-0.5 * (chiSq - 2.0 * ((double)ndof)));
 }
 
 // ------------------------------------------------------------------------------------------------------------
@@ -358,7 +440,19 @@ int main(int, char **argv)
     // error estimation
     Eigen::VectorXd errorVec = JCKErrorEstimation(coeffVector, JCKCoeffVectorContainer);
 
-    // write results to screen
+    // chi squared
+    double chiSq = ChiSq(yData, xData, CInvContainer, numOfQs, coeffVector);
+    // ndof
+    double nDoF = NDoF(xData, coeffVector);
+    // AIC
+    double aic = AIC_weight(chiSq, nDoF);
+
+        // write results to screen
+        std::cout << "Fitted parameters:" << std::endl;
     std::cout << coeffVector << std::endl;
+    std::cout << "Estimated (jackknife) error for fitted paramteres:" << std::endl;
     std::cout << errorVec << std::endl;
+    std::cout << "ChiSq = " << chiSq << std::endl;
+    std::cout << "ndof = " << nDoF << std::endl;
+    std::cout << "AIC = " << aic << std::endl;
 }
