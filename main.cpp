@@ -2,14 +2,13 @@
 
 // used headers/libraries
 #include <Eigen/Dense>
+#include <gsl/gsl_cdf.h>
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <vector>
 #include <math.h>
 #include <numeric>
-
-#include <gsl/gsl_cdf.h>
 
 // ------------------------------------------------------------------------------------------------------------
 
@@ -357,6 +356,14 @@ double AIC_weight(double const &chiSq, int const &ndof)
 
 // ------------------------------------------------------------------------------------------------------------
 
+// Q weight / test (via GSL libraries)
+double Q_weight(double const &chiSq, int const &ndof)
+{
+    return gsl_cdf_chisq_Q(chiSq, ndof);
+}
+
+// ------------------------------------------------------------------------------------------------------------
+
 // main function
 // argv[1] is datafile to fit
 //       1st col --> some physical quantity (x)
@@ -446,6 +453,8 @@ int main(int, char **argv)
     double nDoF = NDoF(xData, coeffVector);
     // AIC
     double aic = AIC_weight(chiSq, nDoF);
+    // Q
+    double Q = Q_weight(chiSq, nDoF);
 
     // write results to screen
     std::cout << "Fitted parameters:" << std::endl;
@@ -455,4 +464,5 @@ int main(int, char **argv)
     std::cout << "ChiSq = " << chiSq << std::endl;
     std::cout << "ndof = " << nDoF << std::endl;
     std::cout << "AIC = " << aic << std::endl;
+    std::cout << "Q = " << Q << std::endl;
 }

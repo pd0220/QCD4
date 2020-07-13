@@ -10,11 +10,16 @@ MESSAGE( [Main] " EIGEN3_INCLUDE_DIRS = ${EIGEN3_INCLUDE_DIRS}")
 
 include_directories(${EIGEN3_INCLUDE_DIRS})
 
+# SET(CMAKE_CXX_FLAGS "-lgsl -lgslcblas -lm -O3")
+
+find_package(GSL REQUIRED)
+link_libraries(GSL::gsl GSL::gslcblas)
+
 if (MSVC)
   string(REGEX REPLACE "/W[0-9]" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
 endif (MSVC)
 
-#SET(CMAKE_CXX_FLAGS "-lgsl -lgslcblas -lm -O3")
+# list(APPEND CMAKE_PREFIX_PATH /home/pesznyak/GSL)
 
 add_executable(CorrFit main.cpp)
 
